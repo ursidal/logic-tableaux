@@ -95,3 +95,14 @@ let make_parser pfn s =
 
 let default_parser = make_parser parse_iff
 ;;
+
+let rec string_of_exp e =
+  match e with
+  |True -> "⊤"
+  | False -> "⊥"
+  | Atom p -> p
+  | Not (e) -> "¬"^(string_of_exp e)
+  | And(e1,e2) -> "("^(string_of_exp e1)^" ∧ "^(string_of_exp e2)^")"
+  | Or(e1,e2) -> "("^(string_of_exp e1)^" ∨ "^(string_of_exp e2)^")"
+  | Imp(e1,e2) -> "("^(string_of_exp e1)^" ⊃ "^(string_of_exp e2)^")"
+  | Iff(e1,e2) -> "("^(string_of_exp e1)^" ≡ "^(string_of_exp e2)^")";;
