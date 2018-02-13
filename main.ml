@@ -43,8 +43,9 @@ type ('a)formula = False
                  | Or of ('a)formula * ('a)formula
                  | Imp of ('a)formula * ('a)formula
                  | Iff of ('a)formula * ('a)formula
-                 | Forall of string * ('a)formula
-                 | Exists of string * ('a)formula;;
+                 (*| Forall of string * ('a)formula
+                 | Exists of string * ('a)formula *)
+;;
 
 (* expr1 -> expr2|expr1 iff expr2
    expr2 -> expr3|expr2 imp expr3
@@ -106,3 +107,197 @@ let rec string_of_exp e =
   | Or(e1,e2) -> "("^(string_of_exp e1)^" ∨ "^(string_of_exp e2)^")"
   | Imp(e1,e2) -> "("^(string_of_exp e1)^" ⊃ "^(string_of_exp e2)^")"
   | Iff(e1,e2) -> "("^(string_of_exp e1)^" ≡ "^(string_of_exp e2)^")";;
+  
+type ('a) tableau =
+  { expr : ('a) formula;
+    expanded : bool;
+    closed : bool;
+    children : 'a children;
+  }
+and ('a) children =
+  |None
+  |One of ('a) tableau
+  |Two of ('a) tableau * ('a) tableau
+
+let empty_tab =
+  {expr = True;
+   closed = false;
+   expanded = false;
+   children = None;}
+                              
+let init_tableau premisses conclusion =
+  let rec aux tableau l =
+    match l with
+      [] -> tableau
+     |x::tl -> aux (One {expr = x;
+                         expanded = false;
+                         closed = false;
+                         children = tableau})
+                 tl
+  in
+  match aux None ((Not conclusion)::(List.rev premisses)) with
+  |None -> failwith "Empty list of premisses and conclusion"
+  |One tableau -> tableau
+  |_ -> failwith "Unexpected result"
+;;
+
+let rec append t child =
+  if t.closed
+  then t
+  else
+    match t.children with
+    |None -> {t with children = child}
+    |One child_tab -> {t with children = One (append child_tab child)}
+    |Two (left,right) -> {t with children = Two (append left child,append right child)}
+;;
+
+let child_apply f c =
+  match c with
+  |None -> None
+  |One child -> One (f child)
+  |Two (left,right) -> Two (f left, f right)
+;;
+
+
+let rec map f t =
+  let (nexpr,nexp,nclosed)=f (t.expr,t.expanded,t.closed) in
+  {expr = nexpr;
+   expanded = nexp;
+   closed = nclosed;
+   children = child_apply (map f) t.children;
+  }
+;;
+
+let check_closed t =
+  let rec passing acc tab =
+    match tab.expr with
+    |Atom p -> if List.mem (Not (Atom p)) acc
+               then {tab with closed = true}
+               else
+                 {tab with children = child_apply (passing ((Atom p)::acc)) tab.children}
+    |Not (Atom p) -> if List.mem (Atom p) acc
+                     then {tab with closed = true}
+                     else
+                       {tab with children = child_apply (passing ((Not (Atom p))::acc)) tab.children}
+    |_ -> {tab with children = child_apply (passing acc) tab.children}
+  in
+  passing [] t
+;;
+
+let rec expand n t =
+  if n = 0
+  then t
+  else  
+    if t.expanded
+    then {t with children = child_apply (expand n) t.children}
+    else
+      match t.expr with
+      |And (a,b) -> let newchild =
+                      One ({empty_tab with expr = a;
+                                           children = One ({empty_tab with expr = b})})
+                    in
+                    append {t with expanded = true} newchild |> expand (n-1)
+      |Not(And(a,b)) -> let newchild =
+                          Two ({empty_tab with expr = Not(a)},{empty_tab with expr = Not(b)})
+                        in
+                        append {t with expanded = true} newchild |> expand (n-1)
+      |Or (a,b) -> let newchild =
+                     Two ({empty_tab with expr = a},{empty_tab with expr = b})
+                   in
+                   append {t with expanded = true} newchild |> expand (n-1)
+      |Not(Or(a,b))-> let newchild =
+                        One ({empty_tab with expr = Not(a);
+                                             children = One ({empty_tab with expr = Not(b)})})
+                      in
+                      append {t with expanded = true} newchild |> expand (n-1)
+      |Imp(a,b) -> let newchild =
+                     Two ({empty_tab with expr = Not(a)},{empty_tab with expr = b})
+                   in
+                   append {t with expanded = true} newchild |> expand (n-1)
+      |Not(Imp(a,b))-> let newchild =
+                         One ({empty_tab with expr = a;
+                                              children = One ({empty_tab with expr = Not(b)})})
+                       in
+                       append {t with expanded = true} newchild |> expand (n-1)
+      |Iff(a,b) -> let newchild =
+                     Two ({empty_tab with expr = a;
+                                          children = One ({empty_tab with expr = b})},
+                          {empty_tab with expr = Not(a);
+                                          children = One ({empty_tab with expr = Not(b)})})
+                   in
+                   append {t with expanded = true} newchild |> expand (n-1)
+      |Not(Iff(a,b)) -> let newchild =
+                          Two ({empty_tab with expr = a;
+                                               children = One ({empty_tab with expr = Not(b)})},
+                               {empty_tab with expr = Not(a);
+                                               children = One ({empty_tab with expr = b})})
+                        in
+                        append {t with expanded = true} newchild |> expand (n-1)
+      |_ -> { t with children = child_apply (expand n) t.children}
+;;
+
+let rec expand_all t =
+    if t.expanded
+    then {t with children = child_apply expand_all t.children}
+    else
+      match t.expr with
+      |And (a,b) -> let newchild =
+                      One ({empty_tab with expr = a;
+                                           children = One ({empty_tab with expr = b})})
+                    in
+                    append {t with expanded = true} newchild |> expand_all
+      |Not(And(a,b)) -> let newchild =
+                          Two ({empty_tab with expr = Not(a)},{empty_tab with expr = Not(b)})
+                        in
+                        append {t with expanded = true} newchild |> expand_all
+      |Or (a,b) -> let newchild =
+                     Two ({empty_tab with expr = a},{empty_tab with expr = b})
+                   in
+                   append {t with expanded = true} newchild |> expand_all
+      |Not(Or(a,b))-> let newchild =
+                        One ({empty_tab with expr = Not(a);
+                                             children = One ({empty_tab with expr = Not(b)})})
+                      in
+                      append {t with expanded = true} newchild |> expand_all
+      |Imp(a,b) -> let newchild =
+                     Two ({empty_tab with expr = Not(a)},{empty_tab with expr = b})
+                   in
+                   append {t with expanded = true} newchild |> expand_all
+      |Not(Imp(a,b))-> let newchild =
+                         One ({empty_tab with expr = a;
+                                              children = One ({empty_tab with expr = Not(b)})})
+                       in
+                       append {t with expanded = true} newchild |> expand_all
+      |Iff(a,b) -> let newchild =
+                     Two ({empty_tab with expr = a;
+                                          children = One ({empty_tab with expr = b})},
+                          {empty_tab with expr = Not(a);
+                                          children = One ({empty_tab with expr = Not(b)})})
+                   in
+                   append {t with expanded = true} newchild |> expand_all
+      |Not(Iff(a,b)) -> let newchild =
+                          Two ({empty_tab with expr = a;
+                                               children = One ({empty_tab with expr = Not(b)})},
+                               {empty_tab with expr = Not(a);
+                                               children = One ({empty_tab with expr = b})})
+                        in
+                        append {t with expanded = true} newchild |> expand_all
+      |_ -> { t with children = child_apply expand_all t.children}
+;;
+
+
+  
+let prettyprint ?(closed="") t indent =
+  let rec tostring n t =
+    let indentation = (String.make n indent) in
+    let childstr = match t.children with
+      |None -> ""
+      |One c -> (tostring (n+1) c)
+      |Two (c1,c2) -> (tostring (n+1) c1)^(tostring (n+1) c2)
+    in
+    let cl = if t.closed then closed else "" in
+    indentation^(string_of_exp t.expr)^cl^"\n"^childstr
+  in
+  print_string (tostring 0 t)
+    ;;
+
