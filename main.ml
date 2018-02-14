@@ -300,4 +300,30 @@ let prettyprint ?(closed="") t indent =
   in
   print_string (tostring 0 t)
     ;;
+    
+    
+let posofint n = 
+  let rec helper i l =
+    match i with
+    |0|1 -> l
+    |i -> let r = mod i 2 and q = i/2 in
+      helper q (r::l)
+  in
+    helper n []
+;;
 
+let make_at f n t =
+  let rec helper binl s =
+    match l with
+    |[] -> f s
+    |i::tl -> match s.children with
+      |None -> failwith "Child not found"
+      |One c -> if i =0 
+                then {s with children = One (helper tl c)} 
+                else failwith "Child not found"
+      |Two (left,right) -> if i = 0
+                           then {s with children = Two (helper tl left,right)}
+                           else {s with children = Two (left,helper tl right)}
+  in
+  helper (posofint n) t
+;;
